@@ -8,7 +8,7 @@
 
 #include "constants.h"
 #include "generated_texture.h"
-#include "terrain_3d_texture_list.h"
+#include "terrain_3d_texture_asset.h"
 #include "terrain_3d_util.h"
 
 class Terrain3D;
@@ -76,8 +76,9 @@ public: // Constants
 		Ref<Image> _control_map;
 		Ref<Image> _color_map;
 
-		// Foliage instancer
-		Dictionary _instances;
+		// Foliage Instancer contains MultiMeshes saved to disk
+		// Dictionary[mesh_id:int] -> MultiMesh
+		Dictionary _multimeshes;
 
 		real_t _version = 0.8f;
 
@@ -91,8 +92,8 @@ public: // Constants
 		Ref<Image> get_color_map() const { return _color_map; }
 
 		// Foliage Instancer
-		void set_instances(Dictionary p_instances) { _instances = p_instances; }
-		Dictionary get_instances() const { return _instances; }
+		void set_multimeshes(Dictionary p_instances) { _multimeshes = p_instances; }
+		Dictionary get_multimeshes() const { return _multimeshes; }
 
 		void set_version(real_t p_version) { _version = p_version; }
 		real_t get_version() { return _version; }
@@ -129,6 +130,7 @@ private:
 	TypedArray<Image> _height_maps;
 	TypedArray<Image> _control_maps;
 	TypedArray<Image> _color_maps;
+	Dictionary _multimeshes; // region offset -> Dictionary
 
 	// Generated Texture RIDs
 	// These contain the TextureLayered RID from the RenderingServer, no Image
@@ -173,6 +175,7 @@ public:
 	Vector2i get_region_file_offset(String p_filename);
 	int get_region_index(Vector3 p_global_position);
 	String get_region_filename(int p_region_id);
+	Vector2i get_region_offset_from_index(int p_index) const;
 	static String get_region_filename_from_offset(Vector2i p_offset);
 	bool has_region(Vector3 p_global_position) { return get_region_index(p_global_position) != -1; }
 	Error add_region(Vector3 p_global_position, const TypedArray<Image> &p_images = TypedArray<Image>(), bool p_update = true, String p_path = "");
@@ -182,13 +185,14 @@ public:
 	void load_region(String p_path, int p_region_id);
 	void load_region_from_offset(String p_path, Vector2i p_region_offset);
 	void register_region(Ref<Terrain3DRegion> p_region, Vector2i p_offset);
+	TypedArray<int> get_regions_under_aabb(AABB p_aabb);
 
 	// Maps
 	void set_map_region(MapType p_map_type, int p_region_index, const Ref<Image> p_image);
 	Ref<Image> get_map_region(MapType p_map_type, int p_region_index) const;
-	void set_maps(MapType p_map_type, const TypedArray<Image> &p_maps);
+	void set_maps(MapType p_map_type, const TypedArray<Image> &p_maps, const TypedArray<int> p_regions = TypedArray<int>());
 	TypedArray<Image> get_maps(MapType p_map_type) const;
-	TypedArray<Image> get_maps_copy(MapType p_map_type) const;
+	TypedArray<Image> get_maps_copy(MapType p_map_type, const TypedArray<int> p_regions = TypedArray<int>()) const;
 	void set_height_maps(const TypedArray<Image> &p_maps) { set_maps(TYPE_HEIGHT, p_maps); }
 	TypedArray<Image> get_height_maps() const { return _height_maps; }
 	RID get_height_rid() { return _generated_height_maps.get_rid(); }
@@ -211,6 +215,8 @@ public:
 	Vector3 get_texture_id(Vector3 p_global_position);
 	TypedArray<Image> sanitize_maps(MapType p_map_type, const TypedArray<Image> &p_maps);
 	void force_update_maps(MapType p_map = TYPE_MAX);
+	void set_multimeshes(const Dictionary p_multimeshes, const TypedArray<int> p_regions = TypedArray<int>());
+	Dictionary get_multimeshes(const TypedArray<int> p_regions = TypedArray<int>()) const;
 
 	// File I/O
 	void save(String p_path);

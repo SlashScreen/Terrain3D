@@ -139,6 +139,13 @@ int Terrain3DRegionManager::get_region_index(Vector3 p_global_position) {
 	return _region_map[pos.y * REGION_MAP_SIZE + pos.x] - 1;
 }
 
+Vector2i Terrain3DRegionManager::get_region_offset_from_index(int p_index) const {
+	if (p_index >= _region_map.size()) {
+		LOG(ERROR, "Attempting to get index of non-existent region ", p_index);
+	}
+	return _region_offsets[p_index];
+}
+
 Vector2i Terrain3DRegionManager::get_region_file_offset(String p_filename) {
 	String working_string = p_filename.trim_suffix(".res");
 	String y_str = working_string.right(3).replace("_", "");
@@ -403,6 +410,37 @@ void Terrain3DRegionManager::register_region(Ref<Terrain3DRegion> p_region, Vect
 	add_region(global_position, maps);
 }
 
+TypedArray<int> Terrain3DRegionManager::get_regions_under_aabb(AABB p_aabb) {
+	TypedArray<int> found = TypedArray<int>();
+
+	// Step 1: Calculate how many region tiles are under the AABB
+	Vector2 start = Vector2(p_aabb.get_position().x, p_aabb.get_position().y);
+	real_t size_x = p_aabb.get_size().x;
+	real_t size_y = p_aabb.get_size().y;
+	real_t rcx = size_x / _region_size;
+	real_t rcy = size_y / _region_size;
+	// This ternary avoids the edge case of the AABB being exactly on the region boundaries
+	int region_count_x = godot::Math::is_equal_approx(godot::Math::fract(rcx), 0.0f) ? (int)(rcx) : (int)ceilf(rcx);
+	int region_count_y = godot::Math::is_equal_approx(godot::Math::fract(rcy), 0.0f) ? (int)(rcy) : (int)ceilf(rcy);
+
+	// Step 2: Check under every region point
+	// Using ceil and min may seem like an odd choice, but it will snap the checking bounds to the edges of the AABB,
+	// ensuring that it also hits regions partially covered by the AABB
+	for (int i = 0; i < region_count_x; i++) {
+		real_t x = start.x + godot::Math::min((real_t)(i * _region_size), size_x);
+		for (int j = 0; j < region_count_y; j++) {
+			real_t y = start.y + godot::Math::min((real_t)(j * _region_size), size_y);
+			int r_index = get_region_index(Vector3(x, 0, y));
+			// If found, append to array
+			if (r_index != -1) {
+				found.append(r_index);
+			}
+		}
+	}
+
+	return found;
+}
+
 void Terrain3DRegionManager::set_map_region(MapType p_map_type, int p_region_index, const Ref<Image> p_image) {
 	switch (p_map_type) {
 		case TYPE_HEIGHT:
@@ -468,21 +506,40 @@ Ref<Image> Terrain3DRegionManager::get_map_region(MapType p_map_type, int p_regi
 	return Ref<Image>();
 }
 
-void Terrain3DRegionManager::set_maps(MapType p_map_type, const TypedArray<Image> &p_maps) {
+void Terrain3DRegionManager::set_maps(MapType p_map_type, const TypedArray<Image> &p_maps, const TypedArray<int> p_regions) {
 	ERR_FAIL_COND_MSG(p_map_type < 0 || p_map_type >= TYPE_MAX, "Specified map type out of range");
-	LOG(INFO, "Setting ", TYPESTR[p_map_type], " maps: ", p_maps.size());
-	switch (p_map_type) {
-		case TYPE_HEIGHT:
-			_height_maps = sanitize_maps(TYPE_HEIGHT, p_maps);
-			break;
-		case TYPE_CONTROL:
-			_control_maps = sanitize_maps(TYPE_CONTROL, p_maps);
-			break;
-		case TYPE_COLOR:
-			_color_maps = sanitize_maps(TYPE_COLOR, p_maps);
-			break;
-		default:
-			break;
+	if (p_regions.is_empty()) {
+		LOG(INFO, "Setting ", TYPESTR[p_map_type], " maps: ", p_maps.size());
+		switch (p_map_type) {
+			case TYPE_HEIGHT:
+				_height_maps = sanitize_maps(TYPE_HEIGHT, p_maps);
+				break;
+			case TYPE_CONTROL:
+				_control_maps = sanitize_maps(TYPE_CONTROL, p_maps);
+				break;
+			case TYPE_COLOR:
+				_color_maps = sanitize_maps(TYPE_COLOR, p_maps);
+				break;
+			default:
+				break;
+		}
+	} else {
+		TypedArray<Image> sanitized = sanitize_maps(p_map_type, p_maps);
+		for (int i; i < p_regions.size(); i++) {
+			switch (p_map_type) {
+				case TYPE_HEIGHT:
+					_height_maps[p_regions[i]] = sanitized[i];
+					break;
+				case TYPE_CONTROL:
+					_control_maps[p_regions[i]] = sanitized[i];
+					break;
+				case TYPE_COLOR:
+					_color_maps[p_regions[i]] = sanitized[i];
+					break;
+				default:
+					break;
+			}
+		}
 	}
 	force_update_maps(p_map_type);
 }
@@ -508,20 +565,31 @@ TypedArray<Image> Terrain3DRegionManager::get_maps(MapType p_map_type) const {
 	return TypedArray<Image>();
 }
 
-TypedArray<Image> Terrain3DRegionManager::get_maps_copy(MapType p_map_type) const {
+TypedArray<Image> Terrain3DRegionManager::get_maps_copy(MapType p_map_type, TypedArray<int> p_regions) const {
 	if (p_map_type < 0 || p_map_type >= TYPE_MAX) {
 		LOG(ERROR, "Specified map type out of range");
 		return TypedArray<Image>();
 	}
 	TypedArray<Image> maps = get_maps(p_map_type);
 	TypedArray<Image> newmaps;
-	newmaps.resize(maps.size());
-	for (int i = 0; i < maps.size(); i++) {
-		Ref<Image> img;
-		img.instantiate();
-		img->copy_from(maps[i]);
-		newmaps[i] = img;
+	if (p_regions.is_empty()) {
+		newmaps.resize(maps.size());
+		for (int i = 0; i < maps.size(); i++) {
+			Ref<Image> img;
+			img.instantiate();
+			img->copy_from(maps[i]);
+			newmaps[i] = img;
+		}
+	} else {
+		newmaps.resize(p_regions.size());
+		for (int i = 0; i < p_regions.size(); i++) {
+			Ref<Image> img;
+			img.instantiate();
+			img->copy_from(maps[p_regions[i]]);
+			newmaps[i] = img;
+		}
 	}
+
 	return newmaps;
 }
 
@@ -706,6 +774,29 @@ void Terrain3DRegionManager::force_update_maps(MapType p_map_type) {
 			break;
 	}
 	update_regions();
+}
+
+void Terrain3DRegionManager::set_multimeshes(Dictionary p_multimeshes, const TypedArray<int> p_regions) {
+	if (p_regions.is_empty()) {
+		_multimeshes = p_multimeshes;
+	} else {
+		for (int i; i < p_regions.size(); i++) {
+			_multimeshes[p_regions[i]] = p_multimeshes[i];
+		}
+	}
+}
+
+Dictionary Terrain3DRegionManager::get_multimeshes(const TypedArray<int> p_regions) const {
+	if (p_regions.is_empty()) {
+		return _multimeshes;
+	} else {
+		Dictionary output = Dictionary();
+		for (int i = 0; i < p_regions.size(); i++) {
+			Vector2i offset = get_region_offset_from_index(i);
+			output[offset] = _multimeshes[p_regions[i]];
+		}
+		return output;
+	}
 }
 
 void Terrain3DRegionManager::save(String p_path) {
@@ -1231,8 +1322,8 @@ void Terrain3DRegionManager::Terrain3DRegion::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_control_map"), &Terrain3DRegionManager::Terrain3DRegion::get_control_map);
 	ClassDB::bind_method(D_METHOD("set_color_map", "map"), &Terrain3DRegionManager::Terrain3DRegion::set_color_map);
 	ClassDB::bind_method(D_METHOD("get_color_map"), &Terrain3DRegionManager::Terrain3DRegion::get_color_map);
-	ClassDB::bind_method(D_METHOD("set_instances", "instances"), &Terrain3DRegionManager::Terrain3DRegion::set_instances);
-	ClassDB::bind_method(D_METHOD("get_instances"), &Terrain3DRegionManager::Terrain3DRegion::get_instances);
+	ClassDB::bind_method(D_METHOD("set_instances", "instances"), &Terrain3DRegionManager::Terrain3DRegion::set_multimeshes);
+	ClassDB::bind_method(D_METHOD("get_instances"), &Terrain3DRegionManager::Terrain3DRegion::get_multimeshes);
 	// Note: Modified is only for C++, don't expose it.
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "heightmap", PROPERTY_HINT_RESOURCE_TYPE, "Image"), "set_height_map", "get_height_map");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "controlmap", PROPERTY_HINT_RESOURCE_TYPE, "Image"), "set_control_map", "get_control_map");

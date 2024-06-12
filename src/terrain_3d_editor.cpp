@@ -5,8 +5,8 @@
 
 #include "logger.h"
 #include "terrain_3d_editor.h"
-#include "terrain_3d_util.h"
 #include "terrain_3d_region_manager.h"
+#include "terrain_3d_util.h"
 
 ///////////////////////////
 // Private Functions
@@ -473,14 +473,16 @@ Dictionary Terrain3DEditor::_collect_undo_data() {
 	if (_tool < 0 || _tool >= TOOL_MAX) {
 		return data;
 	}
+	TypedArray<int> e_regions = _terrain->get_storage()->get_regions_under_aabb(_terrain->get_storage()->get_edited_area());
+	data["edited_regions"] = e_regions;
 	switch (_tool) {
 		case REGION:
 			LOG(DEBUG, "Storing region offsets");
 			data["region_offsets"] = _terrain->get_storage()->get_region_offsets().duplicate();
 			if (_operation == SUBTRACT) {
-				data["height_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_HEIGHT);
-				data["control_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_CONTROL);
-				data["color_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_COLOR);
+				data["height_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_HEIGHT, e_regions);
+				data["control_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_CONTROL, e_regions);
+				data["color_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_COLOR, e_regions);
 				data["height_range"] = _terrain->get_storage()->get_height_range();
 				data["edited_area"] = _terrain->get_storage()->get_edited_area();
 			}
@@ -489,7 +491,7 @@ Dictionary Terrain3DEditor::_collect_undo_data() {
 		case HEIGHT:
 			LOG(DEBUG, "Storing height maps and range");
 			data["region_offsets"] = _terrain->get_storage()->get_region_offsets().duplicate();
-			data["height_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_HEIGHT);
+			data["height_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_HEIGHT, e_regions);
 			data["height_range"] = _terrain->get_storage()->get_height_range();
 			data["edited_area"] = _terrain->get_storage()->get_edited_area();
 			break;
@@ -499,13 +501,13 @@ Dictionary Terrain3DEditor::_collect_undo_data() {
 		case HOLES:
 		case NAVIGATION:
 			LOG(DEBUG, "Storing control maps");
-			data["control_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_CONTROL);
+			data["control_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_CONTROL, e_regions);
 			break;
 
 		case COLOR:
 		case ROUGHNESS:
 			LOG(DEBUG, "Storing color maps");
-			data["color_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_COLOR);
+			data["color_map"] = _terrain->get_storage()->get_maps_copy(Terrain3DRegionManager::TYPE_COLOR, e_regions);
 			break;
 
 		case INSTANCER:
@@ -552,23 +554,24 @@ void Terrain3DEditor::_apply_undo(Dictionary p_set) {
 	LOG(DEBUG, "Apply undo received: ", p_set);
 
 	Array keys = p_set.keys();
+	TypedArray<int> regions = p_set["edited_regions"];
 	for (int i = 0; i < keys.size(); i++) {
 		String key = keys[i];
 		if (key == "region_offsets") {
 			_terrain->get_storage()->set_region_offsets(p_set[key]);
 		} else if (key == "height_map") {
-			_terrain->get_storage()->set_maps(Terrain3DRegionManager::TYPE_HEIGHT, p_set[key]);
+			_terrain->get_storage()->set_maps(Terrain3DRegionManager::TYPE_HEIGHT, p_set[key], regions);
 		} else if (key == "control_map") {
-			_terrain->get_storage()->set_maps(Terrain3DRegionManager::TYPE_CONTROL, p_set[key]);
+			_terrain->get_storage()->set_maps(Terrain3DRegionManager::TYPE_CONTROL, p_set[key], regions);
 		} else if (key == "color_map") {
-			_terrain->get_storage()->set_maps(Terrain3DRegionManager::TYPE_COLOR, p_set[key]);
+			_terrain->get_storage()->set_maps(Terrain3DRegionManager::TYPE_COLOR, p_set[key], regions);
 		} else if (key == "height_range") {
 			_terrain->get_storage()->set_height_range(p_set[key]);
 		} else if (key == "edited_area") {
 			_terrain->get_storage()->clear_edited_area();
 			_terrain->get_storage()->add_edited_area(p_set[key]);
 		} else if (key == "multimeshes") {
-			_terrain->get_storage()->set_multimeshes(p_set[key]);
+			_terrain->get_storage()->set_multimeshes(p_set[key], regions);
 		}
 	}
 	_terrain->get_storage()->set_all_regions_modified();

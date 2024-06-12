@@ -291,7 +291,7 @@ void Terrain3DInstancer::add_instances(Vector3 p_global_position, Dictionary p_p
 		LOG(DEBUG_CONT, "New instance count: ", mm->get_instance_count());
 		set_multimesh(p_global_position, mesh_id, mm);
 	}
-	_terrain->get_storage()->set_modified();
+	_terrain->get_storage()->set_modified(_terrain->get_storage()->get_region_index(p_global_position));
 }
 
 void Terrain3DInstancer::remove_instances(Vector3 p_global_position, Dictionary p_params) {
@@ -361,7 +361,7 @@ void Terrain3DInstancer::remove_instances(Vector3 p_global_position, Dictionary 
 		LOG(DEBUG_CONT, "New instance count: ", mm->get_instance_count());
 		set_multimesh(p_global_position, mesh_id, mm);
 	}
-	_terrain->get_storage()->set_modified();
+	_terrain->get_storage()->set_modified(_terrain->get_storage()->get_region_index(p_global_position));
 }
 
 void Terrain3DInstancer::clear_by_mesh(int p_mesh_id) {
